@@ -1,80 +1,75 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 
 type Role = "user" | "assistant";
-type Msg = { id: string; role: Role; content: string; ts: number };
+type Msg = { id: string; role: Role; text: string; ts: string };
+
+const QUICK = [
+  "Menu pizze",
+  "Senza glutine?",
+  "Allergeni margherita",
+  "Tempi consegna",
+  "Bevande/dolci",
+  "Zone consegna",
+];
 
 function uid() {
-  return Math.random().toString(16).slice(2) + Date.now().toString(16);
-}
-
-function formatTime(ts: number) {
-  const d = new Date(ts);
-  return d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
-}
-
-function clampText(s: string, max = 260) {
-  const clean = s.replace(/\s+/g, " ").trim();
-  if (clean.length <= max) return { short: clean, long: "", clamped: false };
-  return { short: clean.slice(0, max) + "…", long: clean, clamped: true };
-}
-
-function Bubble({ role, content }: { role: Role; content: string }) {
-  const { short, long, clamped } = useMemo(() => clampText(content, 320), [content]);
-  const [open, setOpen] = useState(false);
-  const shown = clamped ? (open ? long : short) : content;
-
-  return (
-    <div className={`mrow ${role}`}>
-      <div className={`mbubble ${role}`}>
-        <div className="mtext">{shown}</div>
-        {clamped && (
-          <button type="button" className="mtoggle" onClick={() => setOpen((v) => !v)}>
-            {open ? "Mostra meno" : "Mostra di più"}
-          </button>
-        )}
-      </div>
-    </div>
-  );
+  return Math.random().toString(16).slice(2);
 }
 
 export default function ChatBox() {
-  const [messages, setMessages] = useState<Msg[]>([
+  // ✅ timestamp iniziale fisso (evita mismatch SSR/Client)
+  const initialMessages: Msg[] = [
     {
-      id: uid(),
+      id: "welcome",
       role: "assistant",
-      ts: Date.now(),
-      content:
-        "Ciao! Sono l’assistente di Pala Pizza 🍕\n\nDimmi cosa ti serve: menu, ingredienti/allergeni, senza glutine, tempi consegna, prenotazione tavolo.\n\n👉 Per ORDINI/PRENOTAZIONI usa il modulo a sinistra (così arriva diretto).",
+      ts: "2025-01-01T12:00:00.000Z",
+      text:
+        "Ciao! Sono l’assistente info di Pala Pizza 🍕\n" +
+        "Posso aiutarti con:\n" +
+        "• Menu e pizze disponibili\n" +
+        "• Allergeni / senza glutine\n" +
+        "• Tempi e zone di consegna\n\n" +
+        "Per ordini/prenotazioni usa il modulo a sinistra ✅",
     },
-  ]);
+  ];
 
+  const [messages, setMessages] = useState<Msg[]>(initialMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
+  const endRef = useRef<HTMLDivElement | null>(null);
 
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [messages, loading]);
-
-  const quick = useMemo(
-    () => ["Menu pizze", "Senza glutine?", "Allergeni margherita", "Tempi consegna", "Bevande/dolci", "Prenotare tavolo"],
+  const timeFmt = useMemo(
+    () =>
+      new Intl.DateTimeFormat("it-IT", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "Europe/Rome",
+      }),
     []
   );
 
-  async function send(text: string) {
-    const t = text.trim();
-    if (!t || loading) return;
+  function formatTime(iso: string) {
+    try {
+      return timeFmt.format(new Date(iso));
+    } catch {
+      return "";
+    }
+  }
 
-    setErr("");
+  function scrollToEnd() {
+    requestAnimationFrame(() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }));
+  }
+
+  async function send(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || loading) return;
+
     setLoading(true);
 
-    const userMsg: Msg = { id: uid(), role: "user", content: t, ts: Date.now() };
+    const userMsg: Msg = { id: uid(), role: "user", ts: new Date().toISOString(), text: trimmed };
     setMessages((m) => [...m, userMsg]);
     setInput("");
 
@@ -82,69 +77,64 @@ export default function ChatBox() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: t }),
+        body: JSON.stringify({ message: trimmed }),
       });
 
-      if (!res.ok) throw new Error("Errore server");
+      const data = await res.json().catch(() => null);
+      const replyText =
+        (data?.reply || data?.message || data?.response || "").toString().trim() ||
+        "Ok 👍 Dimmi cosa ti serve su menu, allergeni o consegna.";
 
-      const data = (await res.json().catch(() => null)) as any;
-      const answer =
-        (data?.reply ?? data?.message ?? data?.text ?? "").toString().trim() ||
-        "Ok! Dimmi pure 😊";
-
-      setMessages((m) => [...m, { id: uid(), role: "assistant", content: answer, ts: Date.now() }]);
+      const botMsg: Msg = { id: uid(), role: "assistant", ts: new Date().toISOString(), text: replyText };
+      setMessages((m) => [...m, botMsg]);
+      scrollToEnd();
     } catch {
-      setErr("Errore chat: riprova tra poco.");
+      const botMsg: Msg = {
+        id: uid(),
+        role: "assistant",
+        ts: new Date().toISOString(),
+        text: "Errore momentaneo. Riprova tra poco.",
+      };
+      setMessages((m) => [...m, botMsg]);
+      scrollToEnd();
     } finally {
       setLoading(false);
+      scrollToEnd();
     }
   }
 
   return (
-    <div className="chatShell">
+    <div className="chatWrap">
       <div className="quickRow">
-        {quick.map((q) => (
-          <button key={q} type="button" className="qbtn" onClick={() => send(q)} disabled={loading}>
+        {QUICK.map((q) => (
+          <button key={q} type="button" className="chip" onClick={() => send(q)} disabled={loading}>
             {q}
           </button>
         ))}
       </div>
 
-      <div className="chatScroll" ref={scrollerRef}>
+      <div className="chatArea">
         {messages.map((m) => (
-          <div key={m.id} className="mwrap">
-            <Bubble role={m.role} content={m.content} />
-            <div className={`mtime ${m.role}`}>{formatTime(m.ts)}</div>
-          </div>
-        ))}
-
-        {loading && (
-          <div className="mrow assistant">
-            <div className="mbubble assistant typing">
-              <span className="tdots"><i></i><i></i><i></i></span>
-              <span className="tlabel">Sto scrivendo…</span>
+          <div key={m.id} className={`msgRow ${m.role}`}>
+            <div className={`bubble ${m.role}`}>
+              <div className="bubbleText">{m.text}</div>
+              <div className="msgMeta">{m.role === "user" ? "Tu" : "Pala Pizza"} · {formatTime(m.ts)}</div>
             </div>
           </div>
-        )}
+        ))}
+        <div ref={endRef} />
       </div>
 
-      {err && <div className="chatErr">{err}</div>}
-
-      <div className="composer">
+      <div className="chatInputRow">
         <textarea
-          className="cinput"
+          className="textarea chatTextarea"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Scrivi qui… (Invio per inviare, Shift+Invio per andare a capo)"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              send(input);
-            }
-          }}
+          placeholder="Scrivi qui la tua domanda…"
+          disabled={loading}
         />
-        <button className="csend" type="button" onClick={() => send(input)} disabled={loading || !input.trim()}>
-          Invia
+        <button className="btnPrimary chatSend" type="button" onClick={() => send(input)} disabled={loading || !input.trim()}>
+          {loading ? "..." : "Invia"}
         </button>
       </div>
     </div>

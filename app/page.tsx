@@ -4,7 +4,6 @@ import React, { useMemo, useState, type FormEvent } from "react";
 import ChatBox from "./components/chatbox";
 
 type OrderType = "ASPORTO" | "CONSEGNA" | "TAVOLO";
-type PayType = "CONTANTI" | "CARTA" | "SATISPAY";
 
 const BUSINESS_NAME = "Pala Pizza";
 const TAGLINE = "Pizzeria & Ristorante · Ordina o prenota in pochi secondi";
@@ -43,16 +42,19 @@ export default function Page() {
   const [type, setType] = useState<OrderType>("ASPORTO");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
-  const [payment, setPayment] = useState<PayType>("CONTANTI");
   const [address, setAddress] = useState("");
   const [people, setPeople] = useState("2");
   const [order, setOrder] = useState("");
   const [note, setNote] = useState("");
 
+  // Allergie
   const [glutenFree, setGlutenFree] = useState(false);
   const [lactoseFree, setLactoseFree] = useState(false);
   const [nutsAllergy, setNutsAllergy] = useState(false);
   const [otherAllergy, setOtherAllergy] = useState("");
+
+  // anti-spam (campo nascosto)
+  const [honeypot, setHoneypot] = useState("");
 
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "err">("idle");
   const [msg, setMsg] = useState("");
@@ -75,34 +77,64 @@ export default function Page() {
     const cleanPhone = phone.trim();
     const cleanOrder = order.trim();
 
-    if (!cleanName || !cleanPhone) return setStatus("err"), setMsg("Inserisci nome e telefono.");
-    if (!date) return setStatus("err"), setMsg("Seleziona una data.");
-    if (!time || time.startsWith("—")) return setStatus("err"), setMsg("Seleziona un orario.");
-    if (needsAddress && !address.trim()) return setStatus("err"), setMsg("Per la consegna serve l’indirizzo.");
-    if (needsPeople && (!people || Number(people) < 1)) return setStatus("err"), setMsg("Inserisci quante persone (min 1).");
-    if (!cleanOrder && type !== "TAVOLO") return setStatus("err"), setMsg("Scrivi l’ordine (per tavolo puoi lasciare vuoto).");
+    if (!cleanName || !cleanPhone) {
+      setStatus("err");
+      setMsg("Inserisci nome e telefono.");
+      return;
+    }
+    if (!date) {
+      setStatus("err");
+      setMsg("Seleziona una data.");
+      return;
+    }
+    if (!time || time.startsWith("—")) {
+      setStatus("err");
+      setMsg("Seleziona un orario.");
+      return;
+    }
+    if (needsAddress && !address.trim()) {
+      setStatus("err");
+      setMsg("Per la consegna serve l’indirizzo.");
+      return;
+    }
+    if (needsPeople && (!people || Number(people) < 1)) {
+      setStatus("err");
+      setMsg("Inserisci quante persone (min 1).");
+      return;
+    }
+    // per TAVOLO l'ordine può essere vuoto
+    if (!cleanOrder && type !== "TAVOLO") {
+      setStatus("err");
+      setMsg("Scrivi l’ordine (per tavolo puoi lasciare vuoto).");
+      return;
+    }
 
-    const allergies = [
+    const allergieArr = [
       glutenFree ? "Senza glutine" : null,
       lactoseFree ? "Senza lattosio" : null,
       nutsAllergy ? "Allergia frutta secca" : null,
       otherAllergy.trim() ? `Altro: ${otherAllergy.trim()}` : null,
-    ].filter(Boolean);
+    ].filter(Boolean) as string[];
 
+    const allergeni = allergieArr.join(", ");
+
+    // ✅ IMPORTANTISSIMO: questi nomi combaciano con /api/bookings
     const payload = {
-      name: cleanName,
-      phone: cleanPhone,
-      type,
-      date,
-      time,
-      payment,
-      address: needsAddress ? address.trim() : "",
-      people: needsPeople ? String(people) : "",
-      order: cleanOrder,
+      nome: cleanName,
+      telefono: cleanPhone,
+      tipo: type,
+      data: date,          // YYYY-MM-DD
+      ora: time,           // HH:mm
+      ordine: type === "TAVOLO" ? (cleanOrder || "Prenotazione tavolo") : cleanOrder,
+
+      indirizzo: needsAddress ? address.trim() : "",
+      persone: needsPeople ? String(people) : "",
+      allergeni,
       note: note.trim(),
-      allergies,
-      source: "web",
-      business: BUSINESS_NAME,
+
+      negozio: BUSINESS_NAME,
+      canale: "APP",
+      honeypot, // se compilato → blocco
     };
 
     try {
@@ -111,7 +143,14 @@ export default function Page() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("Errore invio");
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        setStatus("err");
+        setMsg(data?.error || "Errore invio. Controlla i log su Vercel.");
+        return;
+      }
 
       setStatus("ok");
       setMsg("Richiesta inviata ✅ Ti ricontattiamo a breve.");
@@ -123,6 +162,7 @@ export default function Page() {
       setGlutenFree(false);
       setLactoseFree(false);
       setNutsAllergy(false);
+      setHoneypot("");
     } catch {
       setStatus("err");
       setMsg("Errore invio. Se succede ancora, dimmi cosa esce in Vercel.");
@@ -167,6 +207,13 @@ export default function Page() {
             >
               🧭 Indicazioni
             </a>
+            <button
+              type="button"
+              className="cta ctaRed"
+              onClick={() => document.getElementById("orderCard")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              🔥 Ordina adesso
+            </button>
           </div>
 
           <div className="heroBar" />
@@ -175,16 +222,25 @@ export default function Page() {
         {/* MAIN GRID */}
         <main className="mainGrid">
           {/* ORDER */}
-          <section className="card orderCard">
+          <section id="orderCard" className="card orderCard">
             <div className="cardInner">
               <div className="sectionHead">
                 <h2 className="sectionTitle">Ordina / Prenota</h2>
-                <p className="sectionSub">
-                  Consegna → indirizzo. Tavolo → persone. Compilazione veloce.
-                </p>
+                <p className="sectionSub">Consegna → indirizzo. Tavolo → persone. Compilazione veloce.</p>
               </div>
 
               <form onSubmit={onSubmit} className="formStack">
+                {/* honeypot invisibile */}
+                <input
+                  className="honeypot"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  value={honeypot}
+                  onChange={(e) => setHoneypot(e.target.value)}
+                  placeholder="Lascia vuoto"
+                  aria-hidden="true"
+                />
+
                 <div className="formGrid">
                   <div className="field">
                     <div className="label">Nome</div>
@@ -202,15 +258,6 @@ export default function Page() {
                       <option value="ASPORTO">Asporto</option>
                       <option value="CONSEGNA">Consegna</option>
                       <option value="TAVOLO">Prenota tavolo</option>
-                    </select>
-                  </div>
-
-                  <div className="field">
-                    <div className="label">Pagamento (opzionale)</div>
-                    <select className="select" value={payment} onChange={(e) => setPayment(e.target.value as PayType)}>
-                      <option value="CONTANTI">Contanti</option>
-                      <option value="CARTA">Carta</option>
-                      <option value="SATISPAY">Satispay</option>
                     </select>
                   </div>
 
@@ -238,7 +285,7 @@ export default function Page() {
                 {needsAddress && (
                   <div className="field">
                     <div className="label">Indirizzo consegna</div>
-                    <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Via, numero civico, interno, citofono..." />
+                    <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Via, civico, interno, citofono..." />
                   </div>
                 )}
 

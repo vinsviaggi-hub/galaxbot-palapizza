@@ -1,13 +1,13 @@
-// app/api/bookings/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
 type BookingPayload = {
+  // IT
   nome?: string;
   telefono?: string;
   tipo?: "ASPORTO" | "CONSEGNA" | "TAVOLO";
-  data?: string; // YYYY-MM-DD oppure DD/MM/YYYY
-  ora?: string; // HH:mm (accetto anche 12.30 o 12)
-  ordine?: string; // per TAVOLO può essere vuoto
+  data?: string; // YYYY-MM-DD
+  ora?: string;  // HH:mm
+  ordine?: string;
 
   indirizzo?: string;
   persone?: string;
@@ -16,27 +16,22 @@ type BookingPayload = {
   note?: string;
 
   negozio?: string;
-  canale?: string;
+  canale?: string; // "APP"
   honeypot?: string;
+
+  // ENG (fallback)
+  name?: string;
+  phone?: string;
+  type?: string;
+  date?: string;
+  time?: string;
+  order?: string;
+  address?: string;
+  people?: string;
+  allergies?: string[] | string;
+  business?: string;
+  source?: string;
 };
-
-function normalizeDate(v: string) {
-  const s = (v ?? "").toString().trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-  return s;
-}
-
-function normalizeTime(v: string) {
-  const s = (v ?? "").toString().trim();
-  if (/^\d{2}:\d{2}$/.test(s)) return s;
-  const dot = s.match(/^(\d{1,2})\.(\d{2})$/);
-  if (dot) return `${dot[1].padStart(2, "0")}:${dot[2]}`;
-  const hh = s.match(/^(\d{1,2})$/);
-  if (hh) return `${hh[1].padStart(2, "0")}:00`;
-  return s;
-}
 
 function isValidDate(v: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(v);
@@ -48,9 +43,10 @@ function isValidTime(v: string) {
 export async function POST(req: NextRequest) {
   try {
     const BOOKING_WEBAPP_URL = process.env.BOOKING_WEBAPP_URL;
+
     if (!BOOKING_WEBAPP_URL) {
       return NextResponse.json(
-        { error: "BOOKING_WEBAPP_URL mancante (Vercel env)." },
+        { error: "BOOKING_WEBAPP_URL mancante (configura su .env.local e su Vercel)." },
         { status: 500 }
       );
     }
@@ -62,66 +58,55 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Richiesta non valida." }, { status: 400 });
     }
 
-    const nome = (body?.nome ?? "").toString().trim();
-    const telefono = (body?.telefono ?? "").toString().trim();
-    const tipo = (body?.tipo ?? "").toString().trim().toUpperCase() as
-      | "ASPORTO"
-      | "CONSEGNA"
-      | "TAVOLO"
-      | "";
+    // ✅ mapping IT/ENG
+    const nome = (body?.nome ?? body?.name ?? "").toString().trim();
+    const telefono = (body?.telefono ?? body?.phone ?? "").toString().trim();
+    const tipoRaw = (body?.tipo ?? body?.type ?? "").toString().trim().toUpperCase();
+    const data = (body?.data ?? body?.date ?? "").toString().trim();
+    const ora = (body?.ora ?? body?.time ?? "").toString().trim();
+    const ordine = (body?.ordine ?? body?.order ?? "").toString().trim();
 
-    const data = normalizeDate((body?.data ?? "").toString());
-    const ora = normalizeTime((body?.ora ?? "").toString());
-
-    const ordine = (body?.ordine ?? "").toString().trim();
-    const indirizzo = (body?.indirizzo ?? "").toString().trim();
-    const persone = (body?.persone ?? "").toString().trim();
+    const indirizzo = (body?.indirizzo ?? body?.address ?? "").toString().trim();
+    const persone = (body?.persone ?? body?.people ?? "").toString().trim();
     const pagamento = (body?.pagamento ?? "").toString().trim();
-    const allergeni = (body?.allergeni ?? "").toString().trim();
     const note = (body?.note ?? "").toString().trim();
 
-    const negozio = (body?.negozio ?? "Pala Pizza").toString().trim();
-    const canale = (body?.canale ?? "APP").toString().trim().toUpperCase();
+    let allergeni = (body?.allergeni ?? "").toString().trim();
+    const a2 = body?.allergies;
+    if (!allergeni && Array.isArray(a2)) allergeni = a2.filter(Boolean).join(", ");
+    if (!allergeni && typeof a2 === "string") allergeni = a2;
 
+    const negozio = (body?.negozio ?? body?.business ?? "Pala Pizza").toString().trim();
+    const canale = (body?.canale ?? body?.source ?? "APP").toString().trim().toUpperCase();
+
+    const tipo = tipoRaw as "ASPORTO" | "CONSEGNA" | "TAVOLO";
+
+    // ✅ validazioni: per tavolo ordine può essere vuoto
     if (!nome || !telefono || !tipo || !data || !ora) {
       return NextResponse.json(
-        {
-          error: "Campi obbligatori mancanti (nome, telefono, tipo, data, ora).",
-          received: { nome, telefono, tipo, data, ora, ordine },
-        },
+        { error: "Campi obbligatori mancanti (nome, telefono, tipo, data, ora)." },
         { status: 400 }
       );
     }
 
     if (!["ASPORTO", "CONSEGNA", "TAVOLO"].includes(tipo)) {
-      return NextResponse.json({ error: "Tipo non valido.", received: { tipo } }, { status: 400 });
+      return NextResponse.json({ error: "Tipo non valido." }, { status: 400 });
     }
     if (!isValidDate(data)) {
-      return NextResponse.json(
-        { error: "Formato data non valido (YYYY-MM-DD o DD/MM/YYYY).", received: { data } },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Formato data non valido (YYYY-MM-DD)." }, { status: 400 });
     }
     if (!isValidTime(ora)) {
-      return NextResponse.json(
-        { error: "Formato ora non valido (HH:mm).", received: { ora } },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Formato ora non valido (HH:mm)." }, { status: 400 });
     }
 
-    // regole per tipo
     if (tipo === "CONSEGNA" && !indirizzo) {
       return NextResponse.json({ error: "Per la consegna serve l’indirizzo." }, { status: 400 });
     }
     if (tipo === "TAVOLO" && !persone) {
       return NextResponse.json({ error: "Per il tavolo serve il numero persone." }, { status: 400 });
     }
-    // ordine richiesto SOLO per asporto/consegna
-    if ((tipo === "ASPORTO" || tipo === "CONSEGNA") && !ordine) {
-      return NextResponse.json(
-        { error: "Per asporto/consegna serve l’ordine.", received: { tipo, ordine } },
-        { status: 400 }
-      );
+    if (tipo !== "TAVOLO" && !ordine) {
+      return NextResponse.json({ error: "Per asporto/consegna serve l’ordine." }, { status: 400 });
     }
 
     const forward = {
@@ -132,7 +117,7 @@ export async function POST(req: NextRequest) {
       tipo,
       data,
       ora,
-      ordine: tipo === "TAVOLO" ? ordine : ordine, // lo mando comunque se c’è
+      ordine: tipo === "TAVOLO" ? (ordine || "Prenotazione tavolo") : ordine,
       indirizzo: tipo === "CONSEGNA" ? indirizzo : "",
       persone: tipo === "TAVOLO" ? persone : "",
       pagamento,
@@ -157,7 +142,11 @@ export async function POST(req: NextRequest) {
     }
 
     let parsed: any = null;
-    try { parsed = JSON.parse(text); } catch {}
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // ok
+    }
 
     return NextResponse.json({
       ok: true,
