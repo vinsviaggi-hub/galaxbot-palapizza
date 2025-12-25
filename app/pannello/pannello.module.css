@@ -308,6 +308,22 @@
 .actionWa{background: rgba(37, 211, 102, .16); border-color: rgba(37, 211, 102, .30);}
 .actionMap{background: rgba(255, 200, 0, .20); border-color: rgba(255, 200, 0, .34);}
 
+/* ✅ STATI (NUOVO: badge blu, quindi non serve bottone) */
+.actionOk{
+  background: rgba(22, 163, 74, .16);
+  border-color: rgba(22, 163, 74, .30);
+}
+
+.actionDone{
+  background: rgba(255, 200, 0, .20);
+  border-color: rgba(255, 200, 0, .34);
+}
+
+.actionNo{
+  background: rgba(231, 76, 60, .16);
+  border-color: rgba(231, 76, 60, .32);
+}
+
 .mobileCards{
   display:none;
   margin-top:14px;

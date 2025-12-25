@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
 import styles from "./pannello.module.css";
 
 type OrderRow = {
@@ -14,23 +14,20 @@ type OrderRow = {
   ordine: string;
   indirizzo: string;
   stato: string; // NUOVO | CONFERMATO | ANNULLATO | CONSEGNATO | ...
-  canale: string; // APP | BOT | MANO | ...
+  canale: string; // APP | BOT | MANUALE | ...
   note: string;
 };
 
 function s(v: any) {
   return v === null || v === undefined ? "" : String(v);
 }
-
 function normalizePhone(raw: string) {
   return s(raw).replace(/[^\d+]/g, "");
 }
 
-// Converte qualsiasi data (ISO con T, "Tue Dec ...", "2025-12-23") in YYYY-MM-DD (locale)
 function toDateISO(value: any): string {
   const str = s(value).trim();
   if (!str) return "";
-
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
 
   const d = new Date(str);
@@ -49,7 +46,7 @@ function formatDateIT(iso: string) {
   return `${d}/${m}/${y}`;
 }
 
-function statusKey(raw: string) {
+function statusKey(raw: any) {
   const up = s(raw).trim().toUpperCase();
   if (up === "NUOVA") return "NUOVO";
   if (up === "CONFERMATA") return "CONFERMATO";
@@ -62,22 +59,39 @@ function statusClass(stato: string) {
   if (st === "CONFERMATO") return `${styles.badge} ${styles.badgeGreen}`;
   if (st === "CONSEGNATO") return `${styles.badge} ${styles.badgeYellow}`;
   if (st === "ANNULLATO") return `${styles.badge} ${styles.badgeRed}`;
-  return `${styles.badge} ${styles.badgeBlue}`; // NUOVO default
+  return `${styles.badge} ${styles.badgeBlue}`;
 }
 
 function typeClass(tipo: string) {
   const t = s(tipo).trim().toUpperCase();
   if (t === "CONSEGNA") return `${styles.badge} ${styles.badgeDeliver}`;
   if (t === "ASPORTO") return `${styles.badge} ${styles.badgeTake}`;
-  return `${styles.badge} ${styles.badgeTable}`; // TAVOLO default
+  return `${styles.badge} ${styles.badgeTable}`;
+}
+
+function pick(objOrArr: any, idx: number, keys: string[]) {
+  if (Array.isArray(objOrArr)) return objOrArr[idx];
+  const o = objOrArr || {};
+  for (const k of keys) {
+    if (o[k] !== undefined && o[k] !== null) return o[k];
+    const low = k.toLowerCase();
+    if (o[low] !== undefined && o[low] !== null) return o[low];
+  }
+  const map: Record<string, any> = {};
+  for (const kk of Object.keys(o)) map[kk.toLowerCase()] = o[kk];
+  for (const k of keys) {
+    const v = map[k.toLowerCase()];
+    if (v !== undefined && v !== null) return v;
+  }
+  return undefined;
 }
 
 export default function PannelloOrdiniPalaPizza() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [rows, setRows] = useState<OrderRow[]>([]);
+  const [updatingTs, setUpdatingTs] = useState<string>("");
 
-  // filtri
   const [q, setQ] = useState("");
   const [tipo, setTipo] = useState<"TUTTI" | "TAVOLO" | "ASPORTO" | "CONSEGNA">("TUTTI");
   const [stato, setStato] = useState<"TUTTI" | "NUOVO" | "CONFERMATO" | "ANNULLATO" | "CONSEGNATO">("TUTTI");
@@ -106,39 +120,30 @@ export default function PannelloOrdiniPalaPizza() {
       const list: any[] = Array.isArray(data.rows) ? data.rows : [];
 
       const parsed: OrderRow[] = list.map((item: any) => {
-        const isArr = Array.isArray(item);
-        const get = (i: number, k: string) => (isArr ? item[i] : item?.[k]);
-
-        // colonne attese sheet “Ordini”:
-        // 0 Timestamp, 1 Nome, 2 Telefono, 3 Tipo, 4 Data, 5 Ora, 6 Allergeni,
-        // 7 Ordine, 8 Indirizzo, 9 Stato, 10 Canale, 11 Note
-        const dataISO = toDateISO(get(4, "Data") ?? get(4, "data"));
-        const tipoVal = s(get(3, "Tipo") ?? get(3, "tipo")).trim().toUpperCase();
-        const statoVal = statusKey(get(9, "Stato") ?? get(9, "stato"));
+        const dataISO = toDateISO(pick(item, 4, ["Data", "date", "dataISO", "dataIso"]));
 
         return {
-          timestamp: s(get(0, "Timestamp") ?? get(0, "timestamp")).trim(),
-          nome: s(get(1, "Nome") ?? get(1, "nome")).trim(),
-          telefono: s(get(2, "Telefono") ?? get(2, "telefono")).trim(),
-          tipo: (tipoVal || "TAVOLO") as any,
+          timestamp: s(pick(item, 0, ["Timestamp", "timestamp"])).trim(),
+          nome: s(pick(item, 1, ["Nome", "name", "nome"])).trim(),
+          telefono: s(pick(item, 2, ["Telefono", "phone", "telefono"])).trim(),
+          tipo: s(pick(item, 3, ["Tipo", "type", "tipo"])).trim().toUpperCase() || "TAVOLO",
           dataISO,
-          ora: s(get(5, "Ora") ?? get(5, "ora")).trim(),
-          allergeni: s(get(6, "Allergeni") ?? get(6, "allergeni")).trim(),
-          ordine: s(get(7, "Ordine") ?? get(7, "ordine")).trim(),
-          indirizzo: s(get(8, "Indirizzo") ?? get(8, "indirizzo")).trim(),
-          stato: statoVal,
-          canale: s(get(10, "Canale") ?? get(10, "canale")).trim().toUpperCase(),
-          note: s(get(11, "Note") ?? get(11, "note")).trim(),
+          ora: s(pick(item, 5, ["Ora", "time", "ora"])).trim(),
+          allergeni: s(pick(item, 6, ["Allergeni", "allergens", "allergeni"])).trim(),
+          ordine: s(pick(item, 7, ["Ordine", "order", "ordine"])).trim(),
+          indirizzo: s(pick(item, 8, ["Indirizzo", "address", "indirizzo"])).trim(),
+          stato: statusKey(pick(item, 9, ["Stato", "status", "stato"])),
+          canale: s(pick(item, 10, ["Canale", "source", "canale"])).trim().toUpperCase(),
+          note: s(pick(item, 11, ["Note", "note"])).trim(),
         };
       });
 
-      // ordine per data/ora poi timestamp
       parsed.sort((a, b) => {
         const da = `${a.dataISO} ${a.ora}`.trim();
         const db = `${b.dataISO} ${b.ora}`.trim();
         if (da < db) return -1;
         if (da > db) return 1;
-        return a.timestamp.localeCompare(b.timestamp);
+        return (a.timestamp || "").localeCompare(b.timestamp || "");
       });
 
       setRows(parsed);
@@ -155,25 +160,57 @@ export default function PannelloOrdiniPalaPizza() {
     window.location.href = "/pannello/login";
   }
 
+  async function setStatus(timestamp: string, newStatus: "CONFERMATO" | "CONSEGNATO" | "ANNULLATO") {
+    setErr("");
+    setUpdatingTs(timestamp);
+    try {
+      const r = await fetch("/api/admin/order-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timestamp, stato: newStatus }),
+      });
+      const j = await r.json().catch(() => null);
+
+      if (r.status === 401) {
+        window.location.href = "/pannello/login";
+        return;
+      }
+      if (!r.ok || !j?.ok) {
+        setErr(j?.error || "Errore aggiornando lo stato.");
+        return;
+      }
+
+      // aggiorno subito UI (senza aspettare refresh)
+      setRows((prev) => prev.map((x) => (x.timestamp === timestamp ? { ...x, stato: newStatus } : x)));
+    } catch {
+      setErr("Errore rete aggiornando lo stato.");
+    } finally {
+      setUpdatingTs("");
+    }
+  }
+
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const todayISO = useMemo(() => {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  }, []);
+  const counts = useMemo(() => {
+    const c = { TOT: rows.length, NUOVO: 0, CONFERMATO: 0, ANNULLATO: 0, CONSEGNATO: 0 };
+    for (const r of rows) {
+      const st = statusKey(r.stato);
+      if (st === "NUOVO") c.NUOVO++;
+      else if (st === "CONFERMATO") c.CONFERMATO++;
+      else if (st === "ANNULLATO") c.ANNULLATO++;
+      else if (st === "CONSEGNATO") c.CONSEGNATO++;
+    }
+    return c;
+  }, [rows]);
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
 
     return rows.filter((r) => {
-      const t = s(r.tipo).trim().toUpperCase();
-      if (tipo !== "TUTTI" && t !== tipo) return false;
+      if (tipo !== "TUTTI" && r.tipo !== tipo) return false;
 
       const st = statusKey(r.stato);
       if (stato !== "TUTTI" && st !== stato) return false;
@@ -197,24 +234,12 @@ export default function PannelloOrdiniPalaPizza() {
       ]
         .join(" ")
         .toLowerCase();
-
       return blob.includes(qq);
     });
   }, [rows, q, tipo, stato, from, to]);
 
-  const countsAll = useMemo(() => {
-    const c = { TOT: rows.length, OGGI: 0, NUOVO: 0, CONFERMATO: 0, ANNULLATO: 0, CONSEGNATO: 0 };
-    for (const r of rows) {
-      const st = statusKey(r.stato);
-      if (r.dataISO === todayISO) c.OGGI++;
-
-      if (st === "NUOVO") c.NUOVO++;
-      else if (st === "CONFERMATO") c.CONFERMATO++;
-      else if (st === "ANNULLATO") c.ANNULLATO++;
-      else if (st === "CONSEGNATO") c.CONSEGNATO++;
-    }
-    return c;
-  }, [rows, todayISO]);
+  const busyStyle = (ts: string): CSSProperties =>
+    updatingTs === ts ? { opacity: 0.6, pointerEvents: "none" } : {};
 
   return (
     <div className={styles.page}>
@@ -228,7 +253,7 @@ export default function PannelloOrdiniPalaPizza() {
                 </div>
                 <div>
                   <h1 className={styles.h1}>Pannello Ordini · Pala Pizza</h1>
-                  <p className={styles.sub}>Chiaro, veloce, “vendibile” (PC + telefono).</p>
+                  <p className={styles.sub}>Gestione ordini: conferma, consegna, annulla (PC + telefono).</p>
                 </div>
               </div>
 
@@ -242,23 +267,22 @@ export default function PannelloOrdiniPalaPizza() {
               </div>
             </div>
 
-            {/* 4 cards (come grid da CSS) */}
             <div className={styles.metrics}>
               <div className={styles.card}>
-                <div className={styles.cardLabel}>Oggi</div>
-                <div className={styles.cardValue}>{countsAll.OGGI}</div>
-              </div>
-              <div className={styles.card}>
                 <div className={styles.cardLabel}>Totali</div>
-                <div className={styles.cardValue}>{countsAll.TOT}</div>
+                <div className={styles.cardValue}>{counts.TOT}</div>
               </div>
               <div className={styles.card}>
                 <div className={styles.cardLabel}>Nuovi</div>
-                <div className={styles.cardValue}>{countsAll.NUOVO}</div>
+                <div className={styles.cardValue}>{counts.NUOVO}</div>
               </div>
               <div className={styles.card}>
                 <div className={styles.cardLabel}>Confermati</div>
-                <div className={styles.cardValue}>{countsAll.CONFERMATO}</div>
+                <div className={styles.cardValue}>{counts.CONFERMATO}</div>
+              </div>
+              <div className={styles.card}>
+                <div className={styles.cardLabel}>Annullati</div>
+                <div className={styles.cardValue}>{counts.ANNULLATO}</div>
               </div>
             </div>
 
@@ -354,24 +378,18 @@ export default function PannelloOrdiniPalaPizza() {
                 filtered.map((r, i) => {
                   const phone = normalizePhone(r.telefono);
                   const telHref = phone ? `tel:${phone}` : undefined;
-                  const waHref = phone
-                    ? `https://wa.me/${phone.replace("+", "")}?text=${encodeURIComponent(
-                        `Ciao ${r.nome}! Confermiamo l'ordine del ${formatDateIT(r.dataISO)} alle ${r.ora}.`
-                      )}`
-                    : undefined;
-                  const mapHref =
-                    r.indirizzo && s(r.tipo).toUpperCase() === "CONSEGNA"
-                      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.indirizzo)}`
-                      : undefined;
+
+                  const waText = `Ciao ${r.nome}! 👋\nOrdine ${formatDateIT(r.dataISO)} ore ${r.ora}\nTipo: ${r.tipo}\nOrdine: ${r.ordine}\n${r.allergeni ? `Allergeni: ${r.allergeni}\n` : ""}${r.indirizzo ? `Indirizzo: ${r.indirizzo}\n` : ""}`;
+                  const waHref = phone ? `https://wa.me/${phone.replace("+", "")}?text=${encodeURIComponent(waText)}` : undefined;
 
                   return (
-                    <tr key={`${r.timestamp}-${i}`} className={styles.row}>
+                    <tr key={`${r.timestamp}-${i}`} className={styles.row} style={busyStyle(r.timestamp)}>
                       <td className={styles.mono}>{formatDateIT(r.dataISO)}</td>
                       <td className={styles.mono}>{r.ora || "—"}</td>
                       <td className={styles.name}>{r.nome || "—"}</td>
                       <td className={styles.mono}>{r.telefono || "—"}</td>
                       <td>
-                        <span className={typeClass(r.tipo)}>{s(r.tipo).toUpperCase() || "—"}</span>
+                        <span className={typeClass(r.tipo)}>{r.tipo}</span>
                       </td>
                       <td className={styles.order}>{r.ordine || "—"}</td>
                       <td className={styles.allergeni}>{r.allergeni || "—"}</td>
@@ -387,26 +405,40 @@ export default function PannelloOrdiniPalaPizza() {
                               📞 Chiama
                             </a>
                           ) : null}
+
                           {waHref ? (
-                            <a
-                              className={`${styles.actionBtn} ${styles.actionWa}`}
-                              href={waHref}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
+                            <a className={`${styles.actionBtn} ${styles.actionWa}`} href={waHref} target="_blank" rel="noreferrer">
                               💬 WhatsApp
                             </a>
                           ) : null}
-                          {mapHref ? (
-                            <a
-                              className={`${styles.actionBtn} ${styles.actionMap}`}
-                              href={mapHref}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              📍 Maps
-                            </a>
-                          ) : null}
+
+                          {/* ✅ STATI (gratis) */}
+                          <button
+                            className={`${styles.actionBtn} ${styles.actionOk}`}
+                            onClick={() => setStatus(r.timestamp, "CONFERMATO")}
+                            disabled={updatingTs === r.timestamp}
+                            type="button"
+                          >
+                            ✅ Conferma
+                          </button>
+
+                          <button
+                            className={`${styles.actionBtn} ${styles.actionDone}`}
+                            onClick={() => setStatus(r.timestamp, "CONSEGNATO")}
+                            disabled={updatingTs === r.timestamp}
+                            type="button"
+                          >
+                            🚚 Consegnato
+                          </button>
+
+                          <button
+                            className={`${styles.actionBtn} ${styles.actionNo}`}
+                            onClick={() => setStatus(r.timestamp, "ANNULLATO")}
+                            disabled={updatingTs === r.timestamp}
+                            type="button"
+                          >
+                            ❌ Annulla
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -427,18 +459,12 @@ export default function PannelloOrdiniPalaPizza() {
             filtered.map((r, i) => {
               const phone = normalizePhone(r.telefono);
               const telHref = phone ? `tel:${phone}` : undefined;
-              const waHref = phone
-                ? `https://wa.me/${phone.replace("+", "")}?text=${encodeURIComponent(
-                    `Ciao ${r.nome}! Confermiamo l'ordine del ${formatDateIT(r.dataISO)} alle ${r.ora}.`
-                  )}`
-                : undefined;
-              const mapHref =
-                r.indirizzo && s(r.tipo).toUpperCase() === "CONSEGNA"
-                  ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.indirizzo)}`
-                  : undefined;
+
+              const waText = `Ciao ${r.nome}! 👋\nOrdine ${formatDateIT(r.dataISO)} ore ${r.ora}\nTipo: ${r.tipo}\nOrdine: ${r.ordine}\n${r.allergeni ? `Allergeni: ${r.allergeni}\n` : ""}${r.indirizzo ? `Indirizzo: ${r.indirizzo}\n` : ""}`;
+              const waHref = phone ? `https://wa.me/${phone.replace("+", "")}?text=${encodeURIComponent(waText)}` : undefined;
 
               return (
-                <div key={`${r.timestamp}-m-${i}`} className={styles.mCard}>
+                <div key={`${r.timestamp}-m-${i}`} className={styles.mCard} style={busyStyle(r.timestamp)}>
                   <div className={styles.mTop}>
                     <div>
                       <div className={styles.mName}>{r.nome || "—"}</div>
@@ -450,7 +476,7 @@ export default function PannelloOrdiniPalaPizza() {
                     </div>
                     <div className={styles.mBadges}>
                       <span className={statusClass(r.stato)}>{statusKey(r.stato)}</span>
-                      <span className={typeClass(r.tipo)}>{s(r.tipo).toUpperCase() || "—"}</span>
+                      <span className={typeClass(r.tipo)}>{r.tipo}</span>
                     </div>
                   </div>
 
@@ -480,25 +506,20 @@ export default function PannelloOrdiniPalaPizza() {
                       </a>
                     ) : null}
                     {waHref ? (
-                      <a
-                        className={`${styles.actionBtn} ${styles.actionWa}`}
-                        href={waHref}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <a className={`${styles.actionBtn} ${styles.actionWa}`} href={waHref} target="_blank" rel="noreferrer">
                         💬 WhatsApp
                       </a>
                     ) : null}
-                    {mapHref ? (
-                      <a
-                        className={`${styles.actionBtn} ${styles.actionMap}`}
-                        href={mapHref}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        📍 Maps
-                      </a>
-                    ) : null}
+
+                    <button className={`${styles.actionBtn} ${styles.actionOk}`} onClick={() => setStatus(r.timestamp, "CONFERMATO")} type="button">
+                      ✅ Conferma
+                    </button>
+                    <button className={`${styles.actionBtn} ${styles.actionDone}`} onClick={() => setStatus(r.timestamp, "CONSEGNATO")} type="button">
+                      🚚 Consegnato
+                    </button>
+                    <button className={`${styles.actionBtn} ${styles.actionNo}`} onClick={() => setStatus(r.timestamp, "ANNULLATO")} type="button">
+                      ❌ Annulla
+                    </button>
                   </div>
                 </div>
               );
