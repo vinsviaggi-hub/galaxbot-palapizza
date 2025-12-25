@@ -1,18 +1,23 @@
 import { notFound } from "next/navigation";
 import LoginClient from "./LoginClient";
 
-export const dynamic = "force-dynamic";
-
 export default function Page({
   searchParams,
 }: {
   searchParams?: { key?: string };
 }) {
-  const STAFF_LINK_KEY = process.env.STAFF_LINK_KEY || "";
-  if (!STAFF_LINK_KEY) return notFound();
+  // key dal link: /pannello/login?key=XXXX
+  const provided = (searchParams?.key || "").trim();
 
-  const key = (searchParams?.key || "").trim();
-  if (!key || key !== STAFF_LINK_KEY) return notFound();
+  // key segreta presa da Vercel / .env.local
+  const expected = (process.env.STAFF_LINK_KEY || "").trim();
 
+  // se non esiste la variabile, blocca
+  if (!expected) return notFound();
+
+  // se la key nel link è sbagliata o mancante => 404
+  if (provided !== expected) return notFound();
+
+  // ok: mostro il form login vero (password)
   return <LoginClient />;
 }
