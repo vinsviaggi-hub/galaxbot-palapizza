@@ -1,6 +1,8 @@
+// app/api/orders/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type PizzaOrderPayload = {
   nome?: string;
@@ -51,7 +53,10 @@ function buildOrdineFromBoxes(body: PizzaOrderPayload) {
 export async function POST(req: NextRequest) {
   try {
     const ORDERS_WEBAPP_URL = process.env.ORDERS_WEBAPP_URL;
-    const ORDERS_SHARED_SECRET = process.env.ORDERS_SHARED_SECRET || "";
+
+    // ✅ USIAMO UN SOLO SECRET (quello che hai già su Vercel)
+    // Deve essere lo stesso valore di "SHARED_SECRET" nelle Script Properties di Apps Script.
+    const ORDERS_SHARED_SECRET = process.env.GOOGLE_SCRIPT_SECRET || "";
 
     if (!ORDERS_WEBAPP_URL) {
       return NextResponse.json(
@@ -153,5 +158,3 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   return NextResponse.json({ ok: true });
 }
-
-export const dynamic = "force-dynamic";

@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
 import styles from "./pannello.module.css";
 
 type OrderRow = {
+  id: string;
   timestamp: string;
   nome: string;
   telefono: string;
@@ -13,15 +14,17 @@ type OrderRow = {
   allergeni: string;
   ordine: string;
   indirizzo: string;
-  stato: string; // NUOVO | CONFERMATO | ANNULLATO | CONSEGNATO | ...
-  canale: string; // APP | BOT | MANUALE | ...
+  stato: string; // NUOVO | CONFERMATO | ANNULLATO | CONSEGNATO
+  canale: string; // APP | BOT | MANUALE
   note: string;
 };
 
 function s(v: any) {
   return v === null || v === undefined ? "" : String(v);
 }
+
 function normalizePhone(raw: string) {
+  // accetta "327 123..." o "+39..." ecc
   return s(raw).replace(/[^\d+]/g, "");
 }
 
@@ -29,6 +32,9 @@ function toDateISO(value: any): string {
   const str = s(value).trim();
   if (!str) return "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+
+  const mIt = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(str);
+  if (mIt) return `${mIt[3]}-${mIt[2]}-${mIt[1]}`;
 
   const d = new Date(str);
   if (!Number.isFinite(d.getTime())) return str;
@@ -86,11 +92,35 @@ function pick(objOrArr: any, idx: number, keys: string[]) {
   return undefined;
 }
 
+function buildStatusWaText(r: OrderRow, newStatus: "CONFERMATO" | "CONSEGNATO" | "ANNULLATO") {
+  const base =
+    `Ciao ${r.nome}! 👋\n` +
+    `Ordine ${formatDateIT(r.dataISO)} ore ${r.ora}\n` +
+    `Tipo: ${r.tipo}\n` +
+    `Ordine: ${r.ordine}\n` +
+    `${r.allergeni ? `Allergeni: ${r.allergeni}\n` : ""}` +
+    `${r.indirizzo ? `Indirizzo: ${r.indirizzo}\n` : ""}`;
+
+  if (newStatus === "CONFERMATO") {
+    return `✅ CONFERMATO!\n${base}\nPerfetto, il tuo ordine è confermato. 🍕`;
+  }
+  if (newStatus === "CONSEGNATO") {
+    return `🚚 CONSEGNATO!\n${base}\nGrazie! Buon appetito 😄`;
+  }
+  return `❌ ANNULLATO\n${base}\nPurtroppo non riusciamo a gestire l’ordine ora.`;
+}
+
+function buildWaHref(phoneRaw: string, text: string) {
+  const phone = normalizePhone(phoneRaw).replace("+", "");
+  if (!phone) return "";
+  return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+}
+
 export default function PannelloOrdiniPalaPizza() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [rows, setRows] = useState<OrderRow[]>([]);
-  const [updatingTs, setUpdatingTs] = useState<string>("");
+  const [updatingId, setUpdatingId] = useState<string>("");
 
   const [q, setQ] = useState("");
   const [tipo, setTipo] = useState<"TUTTI" | "TAVOLO" | "ASPORTO" | "CONSEGNA">("TUTTI");
@@ -119,10 +149,13 @@ export default function PannelloOrdiniPalaPizza() {
 
       const list: any[] = Array.isArray(data.rows) ? data.rows : [];
 
-      const parsed: OrderRow[] = list.map((item: any) => {
-        const dataISO = toDateISO(pick(item, 4, ["Data", "date", "dataISO", "dataIso"]));
+      const parsed: OrderRow[] = list.map((item: any, idx: number) => {
+        // Nel tuo sheet: Timestamp|Nome|Telefono|Tipo|Data|Ora|Allergeni|Ordine|Indirizzo|Stato|Bot o Manuale|Note|ID
+        const dataISO = toDateISO(pick(item, 4, ["Data", "date", "dataISO", "dataIso", "data"]));
+        const id = s(pick(item, 12, ["ID", "id"])).trim();
 
         return {
+          id: id || `fallback-${s(pick(item, 0, ["Timestamp", "timestamp"]))}-${idx}`,
           timestamp: s(pick(item, 0, ["Timestamp", "timestamp"])).trim(),
           nome: s(pick(item, 1, ["Nome", "name", "nome"])).trim(),
           telefono: s(pick(item, 2, ["Telefono", "phone", "telefono"])).trim(),
@@ -133,7 +166,7 @@ export default function PannelloOrdiniPalaPizza() {
           ordine: s(pick(item, 7, ["Ordine", "order", "ordine"])).trim(),
           indirizzo: s(pick(item, 8, ["Indirizzo", "address", "indirizzo"])).trim(),
           stato: statusKey(pick(item, 9, ["Stato", "status", "stato"])),
-          canale: s(pick(item, 10, ["Canale", "source", "canale"])).trim().toUpperCase(),
+          canale: s(pick(item, 10, ["Bot o Manuale", "canale", "source"])).trim().toUpperCase(),
           note: s(pick(item, 11, ["Note", "note"])).trim(),
         };
       });
@@ -160,15 +193,22 @@ export default function PannelloOrdiniPalaPizza() {
     window.location.href = "/pannello/login";
   }
 
-  async function setStatus(timestamp: string, newStatus: "CONFERMATO" | "CONSEGNATO" | "ANNULLATO") {
+  async function setStatus(id: string, newStatus: "CONFERMATO" | "CONSEGNATO" | "ANNULLATO") {
     setErr("");
-    setUpdatingTs(timestamp);
+    if (!id) {
+      setErr("ID mancante: controlla che lo script scriva la colonna ID.");
+      return;
+    }
+
+    setUpdatingId(id);
     try {
-      const r = await fetch("/api/admin/order-status", {
+      // ✅ usa la tua route protetta cookie + Apps Script updateStatus
+      const r = await fetch("/api/orders/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ timestamp, stato: newStatus }),
+        body: JSON.stringify({ id, stato: newStatus }),
       });
+
       const j = await r.json().catch(() => null);
 
       if (r.status === 401) {
@@ -180,13 +220,22 @@ export default function PannelloOrdiniPalaPizza() {
         return;
       }
 
-      // aggiorno subito UI (senza aspettare refresh)
-      setRows((prev) => prev.map((x) => (x.timestamp === timestamp ? { ...x, stato: newStatus } : x)));
+      setRows((prev) => prev.map((x) => (x.id === id ? { ...x, stato: newStatus } : x)));
     } catch {
       setErr("Errore rete aggiornando lo stato.");
     } finally {
-      setUpdatingTs("");
+      setUpdatingId("");
     }
+  }
+
+  async function statusAndWhatsapp(r: OrderRow, newStatus: "CONFERMATO" | "CONSEGNATO" | "ANNULLATO") {
+    // Apro WA subito (così il browser non blocca il popup)
+    const phone = normalizePhone(r.telefono);
+    const waText = buildStatusWaText(r, newStatus);
+    const waHref = phone ? buildWaHref(phone, waText) : "";
+    if (waHref) window.open(waHref, "_blank", "noreferrer");
+
+    await setStatus(r.id, newStatus);
   }
 
   useEffect(() => {
@@ -208,7 +257,6 @@ export default function PannelloOrdiniPalaPizza() {
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
-
     return rows.filter((r) => {
       if (tipo !== "TUTTI" && r.tipo !== tipo) return false;
 
@@ -231,6 +279,7 @@ export default function PannelloOrdiniPalaPizza() {
         r.stato,
         r.canale,
         r.note,
+        r.id,
       ]
         .join(" ")
         .toLowerCase();
@@ -238,8 +287,8 @@ export default function PannelloOrdiniPalaPizza() {
     });
   }, [rows, q, tipo, stato, from, to]);
 
-  const busyStyle = (ts: string): CSSProperties =>
-    updatingTs === ts ? { opacity: 0.6, pointerEvents: "none" } : {};
+  const busyStyle = (id: string): CSSProperties =>
+    updatingId === id ? { opacity: 0.6, pointerEvents: "none" } : {};
 
   return (
     <div className={styles.page}>
@@ -253,7 +302,7 @@ export default function PannelloOrdiniPalaPizza() {
                 </div>
                 <div>
                   <h1 className={styles.h1}>Pannello Ordini · Pala Pizza</h1>
-                  <p className={styles.sub}>Gestione ordini: conferma, consegna, annulla (PC + telefono).</p>
+                  <p className={styles.sub}>Aggiorna stato + WhatsApp pronto (PC + telefono).</p>
                 </div>
               </div>
 
@@ -281,8 +330,8 @@ export default function PannelloOrdiniPalaPizza() {
                 <div className={styles.cardValue}>{counts.CONFERMATO}</div>
               </div>
               <div className={styles.card}>
-                <div className={styles.cardLabel}>Annullati</div>
-                <div className={styles.cardValue}>{counts.ANNULLATO}</div>
+                <div className={styles.cardLabel}>Consegnati</div>
+                <div className={styles.cardValue}>{counts.CONSEGNATO}</div>
               </div>
             </div>
 
@@ -379,11 +428,20 @@ export default function PannelloOrdiniPalaPizza() {
                   const phone = normalizePhone(r.telefono);
                   const telHref = phone ? `tel:${phone}` : undefined;
 
-                  const waText = `Ciao ${r.nome}! 👋\nOrdine ${formatDateIT(r.dataISO)} ore ${r.ora}\nTipo: ${r.tipo}\nOrdine: ${r.ordine}\n${r.allergeni ? `Allergeni: ${r.allergeni}\n` : ""}${r.indirizzo ? `Indirizzo: ${r.indirizzo}\n` : ""}`;
-                  const waHref = phone ? `https://wa.me/${phone.replace("+", "")}?text=${encodeURIComponent(waText)}` : undefined;
+                  const waText =
+                    `Ciao ${r.nome}! 👋\n` +
+                    `Ordine ${formatDateIT(r.dataISO)} ore ${r.ora}\n` +
+                    `Tipo: ${r.tipo}\n` +
+                    `Ordine: ${r.ordine}\n` +
+                    `${r.allergeni ? `Allergeni: ${r.allergeni}\n` : ""}` +
+                    `${r.indirizzo ? `Indirizzo: ${r.indirizzo}\n` : ""}`;
+
+                  const waHref = phone
+                    ? `https://wa.me/${phone.replace("+", "")}?text=${encodeURIComponent(waText)}`
+                    : undefined;
 
                   return (
-                    <tr key={`${r.timestamp}-${i}`} className={styles.row} style={busyStyle(r.timestamp)}>
+                    <tr key={`${r.id}-${i}`} className={styles.row} style={busyStyle(r.id)}>
                       <td className={styles.mono}>{formatDateIT(r.dataISO)}</td>
                       <td className={styles.mono}>{r.ora || "—"}</td>
                       <td className={styles.name}>{r.nome || "—"}</td>
@@ -407,16 +465,20 @@ export default function PannelloOrdiniPalaPizza() {
                           ) : null}
 
                           {waHref ? (
-                            <a className={`${styles.actionBtn} ${styles.actionWa}`} href={waHref} target="_blank" rel="noreferrer">
+                            <a
+                              className={`${styles.actionBtn} ${styles.actionWa}`}
+                              href={waHref}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
                               💬 WhatsApp
                             </a>
                           ) : null}
 
-                          {/* ✅ STATI (gratis) */}
                           <button
                             className={`${styles.actionBtn} ${styles.actionOk}`}
-                            onClick={() => setStatus(r.timestamp, "CONFERMATO")}
-                            disabled={updatingTs === r.timestamp}
+                            onClick={() => statusAndWhatsapp(r, "CONFERMATO")}
+                            disabled={updatingId === r.id}
                             type="button"
                           >
                             ✅ Conferma
@@ -424,8 +486,8 @@ export default function PannelloOrdiniPalaPizza() {
 
                           <button
                             className={`${styles.actionBtn} ${styles.actionDone}`}
-                            onClick={() => setStatus(r.timestamp, "CONSEGNATO")}
-                            disabled={updatingTs === r.timestamp}
+                            onClick={() => statusAndWhatsapp(r, "CONSEGNATO")}
+                            disabled={updatingId === r.id}
                             type="button"
                           >
                             🚚 Consegnato
@@ -433,8 +495,8 @@ export default function PannelloOrdiniPalaPizza() {
 
                           <button
                             className={`${styles.actionBtn} ${styles.actionNo}`}
-                            onClick={() => setStatus(r.timestamp, "ANNULLATO")}
-                            disabled={updatingTs === r.timestamp}
+                            onClick={() => statusAndWhatsapp(r, "ANNULLATO")}
+                            disabled={updatingId === r.id}
                             type="button"
                           >
                             ❌ Annulla
@@ -460,11 +522,20 @@ export default function PannelloOrdiniPalaPizza() {
               const phone = normalizePhone(r.telefono);
               const telHref = phone ? `tel:${phone}` : undefined;
 
-              const waText = `Ciao ${r.nome}! 👋\nOrdine ${formatDateIT(r.dataISO)} ore ${r.ora}\nTipo: ${r.tipo}\nOrdine: ${r.ordine}\n${r.allergeni ? `Allergeni: ${r.allergeni}\n` : ""}${r.indirizzo ? `Indirizzo: ${r.indirizzo}\n` : ""}`;
-              const waHref = phone ? `https://wa.me/${phone.replace("+", "")}?text=${encodeURIComponent(waText)}` : undefined;
+              const waText =
+                `Ciao ${r.nome}! 👋\n` +
+                `Ordine ${formatDateIT(r.dataISO)} ore ${r.ora}\n` +
+                `Tipo: ${r.tipo}\n` +
+                `Ordine: ${r.ordine}\n` +
+                `${r.allergeni ? `Allergeni: ${r.allergeni}\n` : ""}` +
+                `${r.indirizzo ? `Indirizzo: ${r.indirizzo}\n` : ""}`;
+
+              const waHref = phone
+                ? `https://wa.me/${phone.replace("+", "")}?text=${encodeURIComponent(waText)}`
+                : undefined;
 
               return (
-                <div key={`${r.timestamp}-m-${i}`} className={styles.mCard} style={busyStyle(r.timestamp)}>
+                <div key={`${r.id}-m-${i}`} className={styles.mCard} style={busyStyle(r.id)}>
                   <div className={styles.mTop}>
                     <div>
                       <div className={styles.mName}>{r.nome || "—"}</div>
@@ -505,19 +576,42 @@ export default function PannelloOrdiniPalaPizza() {
                         📞 Chiama
                       </a>
                     ) : null}
+
                     {waHref ? (
-                      <a className={`${styles.actionBtn} ${styles.actionWa}`} href={waHref} target="_blank" rel="noreferrer">
+                      <a
+                        className={`${styles.actionBtn} ${styles.actionWa}`}
+                        href={waHref}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         💬 WhatsApp
                       </a>
                     ) : null}
 
-                    <button className={`${styles.actionBtn} ${styles.actionOk}`} onClick={() => setStatus(r.timestamp, "CONFERMATO")} type="button">
+                    <button
+                      className={`${styles.actionBtn} ${styles.actionOk}`}
+                      onClick={() => statusAndWhatsapp(r, "CONFERMATO")}
+                      disabled={updatingId === r.id}
+                      type="button"
+                    >
                       ✅ Conferma
                     </button>
-                    <button className={`${styles.actionBtn} ${styles.actionDone}`} onClick={() => setStatus(r.timestamp, "CONSEGNATO")} type="button">
+
+                    <button
+                      className={`${styles.actionBtn} ${styles.actionDone}`}
+                      onClick={() => statusAndWhatsapp(r, "CONSEGNATO")}
+                      disabled={updatingId === r.id}
+                      type="button"
+                    >
                       🚚 Consegnato
                     </button>
-                    <button className={`${styles.actionBtn} ${styles.actionNo}`} onClick={() => setStatus(r.timestamp, "ANNULLATO")} type="button">
+
+                    <button
+                      className={`${styles.actionBtn} ${styles.actionNo}`}
+                      onClick={() => statusAndWhatsapp(r, "ANNULLATO")}
+                      disabled={updatingId === r.id}
+                      type="button"
+                    >
                       ❌ Annulla
                     </button>
                   </div>

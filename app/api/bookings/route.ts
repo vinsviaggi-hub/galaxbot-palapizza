@@ -1,160 +1,61 @@
+// app/api/bookings/route.ts
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { getCookieName, verifySessionToken } from "@/lib/adminAuth";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-// ✅ FISSI (come hai chiesto)
-const SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbyxeW7a15IihXKwkwbPz5tDAehM907_ZWuK6kVPLYh18oyliqopFhAzOFxvpaveNfA/exec";
-const SHEET_NAME = "Ordini";
-
-// (se il tuo script controlla un segreto, mettilo su Vercel come env GOOGLE_SCRIPT_SECRET)
-const GOOGLE_SCRIPT_SECRET = process.env.GOOGLE_SCRIPT_SECRET || "";
-
-type Booking = {
-  timestamp?: string;
-  name?: string;
-  phone?: string;
-  type?: string;
-  date?: string;
-  time?: string;
-  allergens?: string;
-  order?: string;
-  address?: string;
-  status?: string;
-  source?: string; // "APP" / "MANUALE" ecc
-  note?: string;
-};
-
-function pick(obj: any, keys: string[]) {
-  if (!obj || typeof obj !== "object") return "";
-  const lowerMap: Record<string, any> = {};
-  for (const k of Object.keys(obj)) lowerMap[k.toLowerCase()] = obj[k];
-  for (const k of keys) {
-    const v = obj[k] ?? lowerMap[k.toLowerCase()];
-    if (v !== undefined && v !== null) return String(v);
-  }
-  return "";
-}
-
-function normalizeStatus(s: string) {
-  const x = (s || "").trim().toUpperCase();
-  return x || "NUOVO";
-}
-
-function mapRowToBooking(row: any): Booking {
-  const timestamp = pick(row, ["Timestamp", "timestamp"]);
-  const name = pick(row, ["Nome", "name"]);
-  const phone = pick(row, ["Telefono", "phone"]);
-  const type = pick(row, ["Tipo", "type"]);
-  const date = pick(row, ["Data", "date"]);
-  const time = pick(row, ["Ora", "time"]);
-  const allergens = pick(row, ["Allergeni", "allergeni", "allergens"]);
-  const order = pick(row, ["Ordine", "order"]);
-  const address = pick(row, ["Indirizzo", "address"]);
-  const status = normalizeStatus(pick(row, ["Stato", "status"]));
-  const source = pick(row, ["Bot o Manuale", "Bot/Manuale", "source"]);
-  const note = pick(row, ["Note", "note"]);
-
-  return { timestamp, name, phone, type, date, time, allergens, order, address, status, source, note };
-}
-
-function normalizePayload(data: any): Booking[] {
-  const arr =
-    (Array.isArray(data) && data) ||
-    (Array.isArray(data?.bookings) && data.bookings) ||
-    (Array.isArray(data?.data) && data.data) ||
-    (Array.isArray(data?.rows) && data.rows) ||
-    [];
-
-  // formato: {headers:[], rows:[[]]}
-  if (Array.isArray(data?.headers) && Array.isArray(data?.rows)) {
-    const headers: string[] = data.headers.map((x: any) => String(x));
-    return (data.rows as any[]).map((r) => {
-      const obj: any = {};
-      headers.forEach((h, i) => (obj[h] = r?.[i]));
-      return mapRowToBooking(obj);
-    });
-  }
-
-  // formato: prima riga headers
-  if (Array.isArray(arr) && arr.length > 0 && Array.isArray(arr[0]) && typeof arr[0][0] === "string") {
-    const headers: string[] = arr[0].map((x: any) => String(x));
-    return (arr.slice(1) as any[]).map((r) => {
-      const obj: any = {};
-      headers.forEach((h, i) => (obj[h] = r?.[i]));
-      return mapRowToBooking(obj);
-    });
-  }
-
-  return (arr as any[]).map(mapRowToBooking);
-}
-
-async function tryPost() {
-  const res = await fetch(SCRIPT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      action: "list",
-      sheet: SHEET_NAME,
-      secret: GOOGLE_SCRIPT_SECRET,
-    }),
-    cache: "no-store",
-  });
-  const txt = await res.text();
-  const json = (() => {
-    try {
-      return JSON.parse(txt);
-    } catch {
-      return null;
-    }
-  })();
-
-  if (!res.ok) {
-    throw new Error(`POST non ok: ${res.status} ${txt?.slice?.(0, 200)}`);
-  }
-  if (!json) throw new Error("POST ha risposto ma non è JSON");
-  return json;
-}
-
-async function tryGet() {
-  const url = new URL(SCRIPT_URL);
-  url.searchParams.set("action", "list");
-  url.searchParams.set("sheet", SHEET_NAME);
-  if (GOOGLE_SCRIPT_SECRET) url.searchParams.set("secret", GOOGLE_SCRIPT_SECRET);
-
-  const res = await fetch(url.toString(), { method: "GET", cache: "no-store" });
-  const txt = await res.text();
-  const json = (() => {
-    try {
-      return JSON.parse(txt);
-    } catch {
-      return null;
-    }
-  })();
-
-  if (!res.ok) {
-    throw new Error(`GET non ok: ${res.status} ${txt?.slice?.(0, 200)}`);
-  }
-  if (!json) throw new Error("GET ha risposto ma non è JSON");
-  return json;
-}
-
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    // ✅ prima provo POST, se il tuo Apps Script è doPost
+    const GOOGLE_SCRIPT_URL = process.env.GOOGLE_SCRIPT_URL || process.env.BOOKING_WEBAPP_URL || "";
+    const GOOGLE_SCRIPT_SECRET = process.env.GOOGLE_SCRIPT_SECRET || "";
+    const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || "";
+
+    if (!GOOGLE_SCRIPT_URL) {
+      return NextResponse.json({ ok: false, error: "GOOGLE_SCRIPT_URL (o BOOKING_WEBAPP_URL) mancante" }, { status: 500 });
+    }
+    if (!ADMIN_SESSION_SECRET) {
+      return NextResponse.json({ ok: false, error: "ADMIN_SESSION_SECRET mancante" }, { status: 500 });
+    }
+
+    // ✅ Auth via cookie (staff)
+    const cookieStore = await cookies();
+    const token = cookieStore.get(getCookieName())?.value;
+
+    if (!verifySessionToken(token, ADMIN_SESSION_SECRET)) {
+      return NextResponse.json({ ok: false, error: "Non autorizzato" }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const limit = Math.min(Math.max(Number(searchParams.get("limit") || 300), 1), 500);
+
+    // ✅ Legge "Ordini" dal tuo Apps Script
+    const url =
+      `${GOOGLE_SCRIPT_URL}?action=list&sheet=Ordini&limit=${encodeURIComponent(String(limit))}` +
+      (GOOGLE_SCRIPT_SECRET ? `&secret=${encodeURIComponent(GOOGLE_SCRIPT_SECRET)}` : "");
+
+    const r = await fetch(url, { method: "GET", cache: "no-store" });
+    const text = await r.text();
+
     let data: any;
     try {
-      data = await tryPost();
+      data = JSON.parse(text);
     } catch {
-      // ✅ fallback GET, se il tuo Apps Script è doGet
-      data = await tryGet();
+      return NextResponse.json({ ok: false, error: "Risposta non JSON", raw: text }, { status: 502 });
     }
 
-    const bookings = normalizePayload(data);
-    return NextResponse.json(bookings);
+    if (!r.ok || data?.ok === false) {
+      return NextResponse.json(
+        { ok: false, error: data?.error || "Errore lista ordini", detail: data },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, rows: data.rows || [], count: data.count || 0 });
   } catch (err: any) {
     return NextResponse.json(
-      { error: "Errore lettura prenotazioni", details: String(err?.message || err) },
+      { ok: false, error: "Errore server /api/bookings", details: err?.message ?? String(err) },
       { status: 500 }
     );
   }

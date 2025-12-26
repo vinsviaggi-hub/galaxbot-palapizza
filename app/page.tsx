@@ -73,7 +73,7 @@ export default function Home() {
         return;
       }
 
-      setOkMsg("✅ Ordine inviato! La pizzeria ti conferma su WhatsApp/telefono.");
+      setOkMsg("✅ Ordine inviato! Ti confermiamo su WhatsApp/telefono.");
       setOrdine("");
       setAllergeni("");
       setNote("");
@@ -98,138 +98,139 @@ export default function Home() {
               <p className={styles.sub}>Ordina in 30 secondi. Ricevi conferma via WhatsApp/telefono.</p>
             </div>
           </div>
-
-          {/* ✅ NIENTE "Area staff" qui: il pannello è SOLO con link segreto */}
         </header>
 
-        <div className={styles.card}>
-          <div className={styles.cardTitle}>Invia ordine</div>
-          <div className={styles.cardSub}>
-            Campi obbligatori: nome, telefono, tipo, data, ora, ordine (e indirizzo se consegna).
-          </div>
-
-          {err ? <div className={styles.error}>⚠️ {err}</div> : null}
-          {okMsg ? <div className={styles.success}>{okMsg}</div> : null}
-
-          <form className={styles.form} onSubmit={submit} autoComplete="off">
-            {/* honeypot anti-bot */}
-            <input
-              value={honeypot}
-              onChange={(e) => setHoneypot(e.target.value)}
-              className={styles.honeypot}
-              tabIndex={-1}
-              aria-hidden="true"
-            />
-
-            <div className={styles.grid2}>
-              <div className={styles.field}>
-                <label className={styles.label}>Nome *</label>
-                <input
-                  className={styles.input}
-                  value={nome}
-                  onChange={(e) => setNome(e.target.value)}
-                  placeholder="Es. Gennaro"
-                />
-              </div>
-
-              <div className={styles.field}>
-                <label className={styles.label}>Telefono *</label>
-                <input
-                  className={styles.input}
-                  value={telefono}
-                  onChange={(e) => setTelefono(e.target.value)}
-                  placeholder="Es. 327..."
-                  inputMode="tel"
-                />
+        <div className={styles.grid}>
+          {/* FORM */}
+          <section className={styles.card}>
+            <div className={styles.cardTop}>
+              <div>
+                <div className={styles.cardTitle}>Invia ordine</div>
+                <div className={styles.cardSub}>
+                  Obbligatori: nome, telefono, tipo, data, ora, ordine (e indirizzo se consegna).
+                </div>
               </div>
             </div>
 
-            <div className={styles.grid3}>
-              <div className={styles.field}>
-                <label className={styles.label}>Tipo *</label>
-                <select className={styles.select} value={tipo} onChange={(e) => setTipo(e.target.value as Tipo)}>
-                  <option value="ASPORTO">Asporto</option>
-                  <option value="TAVOLO">Tavolo</option>
-                  <option value="CONSEGNA">Consegna</option>
-                </select>
-              </div>
+            {err ? <div className={styles.error}>⚠️ {err}</div> : null}
+            {okMsg ? <div className={styles.success}>{okMsg}</div> : null}
 
-              <div className={styles.field}>
-                <label className={styles.label}>Data *</label>
-                <input className={styles.input} type="date" value={data} onChange={(e) => setData(e.target.value)} />
-              </div>
-
-              <div className={styles.field}>
-                <label className={styles.label}>Ora *</label>
-                <input className={styles.input} type="time" value={ora} onChange={(e) => setOra(e.target.value)} />
-              </div>
-            </div>
-
-            {isConsegna ? (
-              <div className={styles.field}>
-                <label className={styles.label}>Indirizzo *</label>
-                <input
-                  className={styles.input}
-                  value={indirizzo}
-                  onChange={(e) => setIndirizzo(e.target.value)}
-                  placeholder="Via, numero, citofono…"
-                />
-              </div>
-            ) : null}
-
-            <div className={styles.field}>
-              <label className={styles.label}>Ordine *</label>
-              <textarea
-                className={styles.textarea}
-                value={ordine}
-                onChange={(e) => setOrdine(e.target.value)}
-                placeholder="Es. 2 Margherite + 1 Diavola + 1 Coca Cola…"
+            <form className={styles.form} onSubmit={submit} autoComplete="off">
+              {/* honeypot anti-bot */}
+              <input
+                value={honeypot}
+                onChange={(e) => setHoneypot(e.target.value)}
+                className={styles.honeypot}
+                tabIndex={-1}
+                aria-hidden="true"
               />
-              <div className={styles.tip}>Tip: scrivi anche impasto/taglia, bibite, e se hai un orario preferito.</div>
-            </div>
 
-            <div className={styles.grid2}>
-              <div className={styles.field}>
-                <label className={styles.label}>Allergeni</label>
-                <input
-                  className={styles.input}
-                  value={allergeni}
-                  onChange={(e) => setAllergeni(e.target.value)}
-                  placeholder="Es. lattosio, glutine…"
-                />
+              <div className={styles.grid2}>
+                <div className={styles.field}>
+                  <label className={styles.label}>Nome *</label>
+                  <input
+                    className={styles.input}
+                    value={nome}
+                    onChange={(e) => setNome(e.target.value)}
+                    placeholder="Es. Gennaro"
+                  />
+                </div>
+
+                <div className={styles.field}>
+                  <label className={styles.label}>Telefono *</label>
+                  <input
+                    className={styles.input}
+                    value={telefono}
+                    onChange={(e) => setTelefono(e.target.value)}
+                    placeholder="Es. 327..."
+                    inputMode="tel"
+                  />
+                </div>
               </div>
 
-              <div className={styles.field}>
-                <label className={styles.label}>Note</label>
-                <input
-                  className={styles.input}
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Es. senza cipolla, ben cotta…"
-                />
+              <div className={styles.grid3}>
+                <div className={styles.field}>
+                  <label className={styles.label}>Tipo *</label>
+                  <select className={styles.select} value={tipo} onChange={(e) => setTipo(e.target.value as Tipo)}>
+                    <option value="ASPORTO">Asporto</option>
+                    <option value="TAVOLO">Tavolo</option>
+                    <option value="CONSEGNA">Consegna</option>
+                  </select>
+                </div>
+
+                <div className={styles.field}>
+                  <label className={styles.label}>Data *</label>
+                  <input className={styles.input} type="date" value={data} onChange={(e) => setData(e.target.value)} />
+                </div>
+
+                <div className={styles.field}>
+                  <label className={styles.label}>Ora *</label>
+                  <input className={styles.input} type="time" value={ora} onChange={(e) => setOra(e.target.value)} />
+                </div>
               </div>
-            </div>
 
-            <button className={styles.btn} type="submit" disabled={loading || !canSubmit}>
-              {loading ? "Invio…" : "Invia ordine"}
-            </button>
+              {isConsegna ? (
+                <div className={styles.field}>
+                  <label className={styles.label}>Indirizzo *</label>
+                  <input
+                    className={styles.input}
+                    value={indirizzo}
+                    onChange={(e) => setIndirizzo(e.target.value)}
+                    placeholder="Via, numero, citofono…"
+                  />
+                </div>
+              ) : null}
 
-            <div className={styles.footerHint}>
-              Dopo l’invio, la pizzeria vede l’ordine nel pannello e ti conferma su WhatsApp/telefono.
+              <div className={styles.field}>
+                <label className={styles.label}>Ordine *</label>
+                <textarea
+                  className={styles.textarea}
+                  value={ordine}
+                  onChange={(e) => setOrdine(e.target.value)}
+                  placeholder="Es. 2 Margherite + 1 Diavola + 1 Coca Cola…"
+                />
+                <div className={styles.tip}>Scrivi anche impasto/taglia, bibite, e se hai una preferenza orario.</div>
+              </div>
+
+              <div className={styles.grid2}>
+                <div className={styles.field}>
+                  <label className={styles.label}>Allergeni</label>
+                  <input
+                    className={styles.input}
+                    value={allergeni}
+                    onChange={(e) => setAllergeni(e.target.value)}
+                    placeholder="Es. lattosio, glutine…"
+                  />
+                </div>
+
+                <div className={styles.field}>
+                  <label className={styles.label}>Note</label>
+                  <input
+                    className={styles.input}
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="Es. ben cotta, senza cipolla…"
+                  />
+                </div>
+              </div>
+
+              <button className={styles.btn} type="submit" disabled={loading || !canSubmit}>
+                {loading ? "Invio…" : "Invia ordine"}
+              </button>
+
+              <div className={styles.footerHint}>Dopo l’invio, lo staff ti darà conferma.</div>
+            </form>
+          </section>
+
+          {/* BOT */}
+          <section className={styles.botSection}>
+            <div className={styles.botTitle}>Hai dubbi? Chiedi al bot 🍕</div>
+            <div className={styles.botSub}>Orari, consegna/asporto, allergeni, come scrivere l’ordine.</div>
+            <div className={styles.botBox}>
+              <ChatBox />
             </div>
-          </form>
+          </section>
         </div>
-
-        {/* ✅ BOT */}
-        <section className={styles.botSection}>
-          <div className={styles.botTitle}>Hai dubbi? Chiedi al bot 🍕</div>
-          <div className={styles.botSub}>Orari, consegna/asporto, allergeni, come scrivere l’ordine.</div>
-          <div className={styles.botBox}>
-            <ChatBox />
-          </div>
-        </section>
-
-        {/* ✅ Footer demo tolto: niente badge/scritte sotto */}
       </div>
     </div>
   );
